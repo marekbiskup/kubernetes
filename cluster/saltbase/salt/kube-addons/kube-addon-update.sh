@@ -18,6 +18,36 @@
 # was already enforced by salt, and /etc/kubernetes/addons is the
 # managed result is of that. Start everything below that directory.
 
+# Parameters
+# $1 path to add-ons
+
+
+# LIMITATIONS
+# 1. controllers are not updated unless their name is changed
+# 2. Services are treated as controllers, i.e. they will be udpated
+#    if service name is changed. the suffix after the last '-' is
+#    treated as verson. But we don't name services like this.
+# 3. Services will not be updated unless thir name is changed,
+#    but for services we acually want updates without name change.
+# 4. Json files are not handled at all. Currently addons must be
+#    in yaml files
+# 5. exit code is prabably not always correct (I haven't checked
+#    carefully if it works in 100% cases)
+# 6. There are no unittests
+# 7. object kind is checked using 'grep' it's possible that it doesn't work in
+#    all cases
+# 8. Will not work if the total length of paths to addons is greater than
+#    bash can handle. Probably it is not a problem: ARG_MAX=2097152 on GCE.
+#
+
+# cosmetic improvements to be done
+# 1. improve the log function; add timestamp, file name, etc.
+# 2. logging doesn't work from files that print things out.
+# 3. kubectl prints the output to stderr (the output should be captured and then
+#    logged)
+
+
+
 # global config
 KUBECTL=${TEST_KUBECTL:-/usr/local/bin/kubectl}   # substitute for tests
 NUM_TRIES_FOR_CREATE=${TEST_NUM_TRIES:-100}
@@ -30,6 +60,9 @@ if [[ ! -f $KUBECTL ]]; then
     exit 1
 fi
 
+
+# remember that you can't log from functions that print some output (because
+# logs are also printed on stdout)
 # $1 level
 # $2 message
 function log() {
@@ -38,20 +71,26 @@ function log() {
   # add the timestamp if you find it useful
   case $1 in
     DB3 )
-#      echo "$1: $2"
-      ;;
+#        echo "$1: $2"
+        ;;
     DB2 )
-#      echo "$1: $2"
-      ;;
+#        echo "$1: $2"
+        ;;
     DBG )
-      echo "$1: $2"
-      ;;
+#        echo "$1: $2"
+        ;;
     INFO )
-      echo "$1: $2" 
-      ;;
+        echo "$1: $2"
+        ;;
+    WRN )
+        echo "$1: $2"
+        ;;
+    ERR )
+        echo "$1: $2"
+        ;;
     * )
-      echo "INVALID_LOG_LEVEL $1: $2" 
-      ;;
+        echo "INVALID_LOG_LEVEL $1: $2"
+        ;;
   esac
 }
 
@@ -62,25 +101,41 @@ function log() {
 # echoes the string with paths to files containing addon for the given type
 # works only for yaml files (!) (ignores json files)
 function get-addons-from-disk() {
+    # prints to stdout, so log cannot be used
     local -r addon_path=$1
     local -r obj_type=$2
 
     for filePath in $(find $addon_path -name \*.yaml); do
-        cat "${filePath}" | grep "^kind: ${obj_type}" >/dev/null 2>/dev/null # WARNING: assumption that the topmost indentation is zero (I'm not sure yaml allows for topmost indentation)
+        # WARNING: assumption that the topmost indentation is zero (I'm not sure yaml allows for topmost indentation)
+        cat "${filePath}" | grep "^kind: ${obj_type}" >/dev/null 2>/dev/null 
         if [[ $? -eq 0 ]]; then
             echo $filePath
         fi
     done
 }
 
+# $1 file path
+function get-object-name-from-file() {
+    # prints to stdout, so log cannot be used
+    #WARNING: only yaml is supported
+    local -r name=$(cat $1 | python -c '''
+try:
+            import pipes,sys,yaml
+            y = yaml.load(sys.stdin)
+            print y["metadata"]["name"]
+except Exception, ex:
+            print "ERROR: %s" % ex
+        ''')
+    echo "${name}"
+}
 
 # waits for all subprocesses
 # returns 0 if all of them were successful and 1 otherwise
 function wait-for-jobs() {
-    local rv=1
+    local rv=0
     for pid in $(jobs -p); do
-        wait ${pid} || rv=1
-        log DB2 "++ pid ${pid} complete ++"
+        wait ${pid} || (rv=1; log ERR "error in pid ${pid}")
+        log DB2 "pid ${pid} completed, current error code: $rv"
     done
     return $rv
 }
@@ -114,6 +169,7 @@ function get-addons-from-server() {
 # returns the characters after the last '-' (without it)
 # $1 input string
 function get-suffix() {
+    # prints to stdout, so log cannot be used
     local input_string=$1
     # this will get the last field
     echo "$input_string" | rev | cut -d "-" -f1 | rev
@@ -122,6 +178,7 @@ function get-suffix() {
 # returns the characters up to the last '-' (without it)
 # $1 input string
 function get-basename() {
+    # prints to stdout, so log cannot be used
     local -r input_string=$1
     local suffix=`get-suffix $input_string`
     suffix="-${suffix}"
@@ -132,14 +189,14 @@ function get-basename() {
 function stop-object() {
     local -r obj_type=$1
     local -r obj_name=$2
-    log DB2 "Stopping $obj_type $obj_name"
+    log INFO "Stopping $obj_type $obj_name"
     run-until-success "${KUBECTL} stop ${obj_type} ${obj_name}" $NUM_TRIES_FOR_STOP $DELAY_AFTER_STOP_ERROR_SEC
 }
 
 function create-object() {
     local -r obj_type=$1
     local -r file_path=$2
-    log DB2 "Creating new $obj_type from file $file"
+    log INFO "Creating new $obj_type from file $file"
     run-until-success "${KUBECTL} create -f ${file_path}" $NUM_TRIES_FOR_CREATE $DELAY_AFTER_CREATE_ERROR_SEC
 }
 
@@ -147,7 +204,7 @@ function update-object() {
     local -r obj_type=$1
     local -r obj_name=$2
     local -r file_path=$3
-    log DB2 "updating the $obj_type $obj_name with the new definition $file_path"
+    log INFO "updating the $obj_type $obj_name with the new definition $file_path"
     stop-object $obj_type $obj_name
     create-object $obj_type $file_path
 }
@@ -159,7 +216,7 @@ function stop-objects() {
     local -r obj_type=$1
     local -r obj_names=$2
     for obj_name in $obj_names; do
-        stop-object $obj_type $obj_names
+        stop-object $obj_type $obj_names &
     done
 }
 
@@ -170,7 +227,7 @@ function create-objects() {
     local -r obj_type=$1
     local -r file_paths=$2
     for file_path in $file_paths; do
-        create-object $obj_type $file_path
+        create-object $obj_type $file_path &
     done
 }
 
@@ -183,7 +240,7 @@ function update-objects() {
     local -r update_spec=$2
     for objdesc in $update_spec; do
         IFS=';' read -a array <<< $objdesc
-        update-object $obj_type ${array[0]} ${array[1]}
+        update-object $obj_type ${array[0]} ${array[1]} &
     done
 }
 
@@ -224,7 +281,13 @@ function match-objects() {
         # what to do with it
         found=0
         for obj in $in_files; do
-            name_from_file=`basename $obj .yaml`   #WARNING: only yaml is supported
+            name_from_file=`get-object-name-from-file $obj`
+            if [[ "$name_from_file" == "ERROR" ]]; then
+                log INFO "Cannot read object name from $obj. Ignoring"
+                continue
+            else
+                log DB2 "Found object name '$name_from_file' in file $obj"
+            fi
             new_suffix=`get-suffix $name_from_file`
             new_suffix="${new_suffix}"
             log DB3 "matching: ${objBasename}-${new_suffix} == ${name_from_file}"
@@ -264,12 +327,22 @@ function reconcile-objects() {
     local -r obj_type=$2
     match-objects $addon_path $obj_type
 
-    log DBG "for_delete=$for_delete"
-    log DBG "for_update=$for_update"
-    log DBG "for_ignore=$for_ignore"
-    log DBG "new_files=$new_files"
+    log DBG "$obj_type: for_delete=$for_delete"
+    log DBG "$obj_type: for_update=$for_update"
+    log DBG "$obj_type: for_ignore=$for_ignore"
+    log DBG "$obj_type: new_files=$new_files"
 
     stop-objects "$obj_type" "$for_delete"
+    # wait for jobs below is a protection against changing the basename
+    # of a replication controllerm without changing the selector.
+    # If we don't wait, the new rc may be created before the old one is deleted
+    # In such case the old one will wait for all its pods to be gone, but the pods
+    # are created by the new replication controller. 
+    # passing --cascade=false could solve the problem, but we want 
+    # all orphan pods to be deleted.
+    wait-for-jobs
+    stopResult=$?
+
     create-objects "$obj_type" "$new_files"
     update-objects "$obj_type" "$for_update"
 
@@ -278,23 +351,34 @@ function reconcile-objects() {
     done
 
     wait-for-jobs
-    return $?
+    createUpdateResult=$?
+
+    if [[ $stopResult == 0 ]] && [[ $createUpdateResult == 0 ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 function update-addons() {
     local -r addon_path=$1
     # be careful, reconcile-objects uses global variables
-    reconcile-objects $addon_path ReplicationController
-    reconcile-objects $addon_path Service
+    reconcile-objects $addon_path ReplicationController &
+
+    # Warning, we don't expect service names to be versioned, so
+    # the update for services should be turned off - just new services
+    # should be created and the old ones should be gone
+    # Also, if service description differs, the service should be recreated
+    # regardless of its name. This is not implemented in this version.
+    reconcile-objects $addon_path Service &
 
     wait-for-jobs
     if [ $? == 0 ]; then
         log INFO "== Kubernetes addon upgrade completed successfully at $(date -Is) =="
     else
-        log INFO "== Kubernetes addon upgrader completed with errors at $(date -Is) =="
+        log WRN "== Kubernetes addon upgrader completed with errors at $(date -Is) =="
     fi
 }
-
 
 if [ "$#" -ne 1 ]; then
     echo "Illegal number of parameters" 1>&2
@@ -303,5 +387,4 @@ fi
 
 addon_path=$1
 update-addons $addon_path
-
 

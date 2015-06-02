@@ -38,3 +38,8 @@ while true; do
 
 done;
 
+# We stay around so that status checks by salt make it look like
+# the service is good. (We could do this is other ways, but this
+# is simple.)
+sleep infinity
+

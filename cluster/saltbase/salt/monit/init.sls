@@ -28,6 +28,14 @@ monit:
     - group: root
     - mode: 644
 
+/etc/monit/conf.d/kube-addons:
+  file:
+    - managed
+    - source: salt://monit/kube-addons
+    - user: root
+    - group: root
+    - mode: 644
+
 /etc/monit/monit_watcher.sh:
   file.managed:
     - source: salt://monit/monit_watcher.sh

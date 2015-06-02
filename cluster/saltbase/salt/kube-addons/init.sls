@@ -1,3 +1,16 @@
+addon-dir-delete:
+  file.absent:
+    - name: /etc/kubernetes/addons
+
+addon-dir-create:
+  file.directory:
+    - name: /etc/kubernetes/addons
+    - user: root
+    - group: root
+    - mode: 0755
+    - require:
+        - file: addon-dir-delete
+
 {% if pillar.get('enable_cluster_monitoring', '').lower() == 'influxdb' %}
 /etc/kubernetes/addons/cluster-monitoring/influxdb:
   file.recurse:
@@ -58,6 +71,13 @@
     - group: root
     - mode: 755
 
+/etc/kubernetes/kube-addon-update.sh:
+  file.managed:
+    - source: salt://kube-addons/kube-addon-update.sh
+    - user: root
+    - group: root
+    - mode: 755
+
 {% if grains['os_family'] == 'RedHat' %}
 
 /usr/lib/systemd/system/kube-addons.service:
@@ -80,3 +100,4 @@
 kube-addons:
   service.running:
     - enable: True
+    - reload: True
