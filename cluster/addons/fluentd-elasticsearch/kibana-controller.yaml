@@ -1,7 +1,7 @@
 apiVersion: v1beta3
 kind: ReplicationController
 metadata:
-  name: kibana-logging-v1
+  name: kibana-logging
   namespace: default
   labels:
     k8s-app: kibana-logging

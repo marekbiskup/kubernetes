@@ -4,6 +4,7 @@ metadata:
   labels: 
     kubernetes.io/cluster-service: "true"
     kubernetes.io/name: "Grafana"
+    version: v1
   name: monitoring-grafana
 spec: 
   ports: 

@@ -6,6 +6,7 @@ metadata:
   labels:
     k8s-app: kube-dns-v2
     kubernetes.io/cluster-service: "true"
+    version: v2
 spec:
   replicas: {{ pillar['dns_replicas'] }}
   selector:

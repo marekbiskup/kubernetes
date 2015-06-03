@@ -5,6 +5,7 @@ namespace: default
 labels:
   k8s-app: kube-dns
   kubernetes.io/cluster-service: "true"
+  version: v1
 desiredState:
   replicas: {{ pillar['dns_replicas'] }}
   replicaSelector:

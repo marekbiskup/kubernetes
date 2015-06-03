@@ -66,13 +66,13 @@ function log() {
   # add the timestamp if you find it useful
   case $1 in
     DB3 )
-#        echo "$1: $2"
+        echo "$1: $2"
         ;;
     DB2 )
-#        echo "$1: $2"
+        echo "$1: $2"
         ;;
     DBG )
-#        echo "$1: $2"
+        echo "$1: $2"
         ;;
     INFO )
         echo "$1: $2"
@@ -123,7 +123,7 @@ try:
             # Otherwise we are ignoring them (the update will not work anyway)
             print ERROR
         else:
-            print y["metadata"]["name"]
+            print "%s@%s" % (y["metadata"]["name"], y["metadata"]["labels"]["version"])
 except Exception, ex:
         print "ERROR"
     '''
@@ -182,7 +182,7 @@ function run-until-success() {
 # $1 object type
 function get-addons-from-server() {
     local -r obj_type=$1
-    "${KUBECTL}" get "${obj_type}" -o template -t "{{range.items}}{{.metadata.name}} {{end}}" --api-version=v1beta3 -l kubernetes.io/cluster-service=true
+    "${KUBECTL}" get "${obj_type}" -o template -t "{{range.items}}{{.metadata.name}}@{{.metadata.labels.version}} {{end}}" --api-version=v1beta3 -l kubernetes.io/cluster-service=true
 }
 
 # returns the characters after the last separator (including)
@@ -202,8 +202,8 @@ function get-suffix() {
     fi
 
     if  [[ "${input_string}" == *"${separator}"* ]]; then
-        suffix=$(echo "${input_string}" | rev | cut -d "-" -f1 | rev)
-        echo "-$suffix"
+        suffix=$(echo "${input_string}" | rev | cut -d "${separator}" -f1 | rev)
+        echo "${separator}${suffix}"
     else
         echo ""
     fi
@@ -289,11 +289,10 @@ new_files=""        # a list of file paths that weren't matched by any existing 
 
 # $1 path to files with objects
 # $2 object type in the API (ReplicationController or Service)
-# $3 name separator (single character or empty)
 function match-objects() {
     local -r addon_path=$1
     local -r obj_type=$2
-    local -r separator=$3
+    local -r separator="@"
 
     # output variables (globals)
     for_delete=""
@@ -308,49 +307,49 @@ function match-objects() {
     log DB2 "in_files=${in_files}"
 
     local matched_files=""
-    local name_from_file=""
-    local new_suffix
+    local name_and_version_from_file=""
+    local version_from_file
 
-    for obj_on_server in ${on_server}; do
-        obj_basename=$(get-basename ${obj_on_server} ${separator})
-        suffix="$(get-suffix ${obj_on_server} ${separator})"
+    for name_and_version_on_server in ${on_server}; do
+        name_on_server=$(get-basename ${name_and_version_on_server} ${separator})
+        version_on_server="$(get-suffix ${name_and_version_on_server} ${separator})"
 
-        log DB3 "Found existing addon ${obj_on_server}, basename=${obj_basename}"
+        log DB3 "Found existing addon ${name_and_version_on_server}, basename=${name_on_server}"
 
         # check if the addon is present in the directory and decide
         # what to do with it
         # this is not optimal because we're reading the files over and over
         # again. But for small number of addons it doesn't matter so much.
         found=0
-        for obj in ${in_files}; do
-            name_from_file=$(get-object-name-from-file ${obj})
-            if [[ "${name_from_file}" == "ERROR" ]]; then
+        for file_path in ${in_files}; do
+            name_and_version_from_file=$(get-object-name-from-file ${file_path})
+            if [[ "${name_and_version_from_file}" == "ERROR" ]]; then
                 log INFO "Cannot read object name from ${obj}. Ignoring"
                 continue
             else
-                log DB2 "Found object name '${name_from_file}' in file ${obj}"
+                log DB2 "Found object name '${name_and_version_from_file}' in file ${file_path}"
             fi
-            new_suffix="$(get-suffix ${name_from_file} ${separator})"
+            version_from_file="$(get-suffix ${name_and_version_from_file} ${separator})"
 
-            log DB3 "matching: ${obj_basename}${new_suffix} == ${name_from_file}"
-            if [[ "${obj_basename}${new_suffix}" == "${name_from_file}" ]]; then
-                log DB3 "matched existing ${obj_type} ${obj_on_server} to file ${obj}; suffix=${suffix}, new_suffix=${new_suffix}"
-                if [[ "${suffix}" == "${new_suffix}" ]]; then
-                    for_ignore="${for_ignore} ${name_from_file}"
-                    matched_files="${matched_files} ${obj}"
+            log DB3 "matching: ${name_on_server}${version_from_file} == ${name_and_version_from_file}"
+            if [[ "${name_on_server}${version_from_file}" == "${name_and_version_from_file}" ]]; then
+                log DB3 "matched existing ${obj_type} ${name_and_version_on_server} to file ${file_path}; version_on_server=${version_on_server}, version_from_file=${new_suffix}"
+                if [[ "${version_on_server}" == "${version_from_file}" ]]; then
+                    for_ignore="${for_ignore} ${name_on_server}"
+                    matched_files="${matched_files} ${file_path}"
                     found=1
                     break
                 else
-                    for_update="${for_update} ${obj_on_server};${obj}"
-                    matched_files="${matched_files} ${obj}"
+                    for_update="${for_update} ${name_on_server};${file_path}"
+                    matched_files="${matched_files} ${file_path}"
                     found=1
                     break
                 fi
             fi
         done
         if [[ ${found} -eq 0 ]]; then
-            log DB2 "No definition file found for replication controller ${obj_on_server}. Scheduling for deletion"
-            for_delete="${for_delete} ${obj_on_server}"
+            log DB2 "No definition file found for replication controller ${name_on_server}. Scheduling for deletion"
+            for_delete="${for_delete} ${name_on_server}"
         fi
     done
 
@@ -369,8 +368,7 @@ function match-objects() {
 function reconcile-objects() {
     local -r addon_path=$1
     local -r obj_type=$2
-    local -r separator=$3    # name separator
-    match-objects ${addon_path} ${obj_type} ${separator}
+    match-objects ${addon_path} ${obj_type}
 
     log DBG "${obj_type}: for_delete=${for_delete}"
     log DBG "${obj_type}: for_update=${for_update}"
@@ -408,14 +406,8 @@ function reconcile-objects() {
 function update-addons() {
     local -r addon_path=$1
     # be careful, reconcile-objects uses global variables
-    reconcile-objects ${addon_path} ReplicationController "-" &
-
-    # We don't expect service names to be versioned, so
-    # we match entire name, ignoring version suffix.
-    # That's why we pass an empty string as the version separator.
-    # If the service description differs on disk, the service should be recreated.
-    # This is not implemented in this version.
-    reconcile-objects ${addon_path} Service "" &
+    reconcile-objects ${addon_path} ReplicationController &
+    reconcile-objects ${addon_path} Service &
 
     wait-for-jobs
     if [[ $? -eq 0 ]]; then

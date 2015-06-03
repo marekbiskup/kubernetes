@@ -1,7 +1,7 @@
 apiVersion: v1beta3
 kind: ReplicationController
 metadata:
-  name: monitoring-influx-grafana-v1
+  name: monitoring-influx-grafana
   namespace: default 
   labels: 
     k8s-app: influxGrafana
