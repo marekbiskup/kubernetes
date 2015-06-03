@@ -100,4 +100,4 @@ addon-dir-create:
 kube-addons:
   service.running:
     - enable: True
-    - reload: True
+
