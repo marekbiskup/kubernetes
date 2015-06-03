@@ -105,7 +105,7 @@ try:
         else:
             print y["kind"]
 except Exception, ex:
-        print "ERROR: %s" % ex
+        print "ERROR"
     '''
 }
 
@@ -125,7 +125,7 @@ try:
         else:
             print y["metadata"]["name"]
 except Exception, ex:
-        print "ERROR: %s" % ex
+        print "ERROR"
     '''
 }
 

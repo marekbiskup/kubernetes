@@ -12,7 +12,7 @@ Yaml files that do not define this label will be ignored.
 The naming convention for Replication Controllers is
 ```<basename>-<version>```, where ```<basename>``` is the same in consecutive
 versions and ```<version>``` changes when the component is updated
-(```<version>``` must not contain ```'```). For instance,
+(```<version>``` must not contain ```-```). For instance,
 ```heapseter-controller-v1``` and ```heapster-controller-12``` are the
 same controllers with two different versions, while ```heapseter-controller-v1```
 and ```heapster-newcontroller-12``` are treated as two different applications.
@@ -40,3 +40,6 @@ of:
   1. Note that this cannot happen for Services as their version is always empty.
 
 
+
+
+[![Analytics](https://kubernetes-site.appspot.com/UA-36037335-10/GitHub/cluster/addons/README.md?pixel)]()
